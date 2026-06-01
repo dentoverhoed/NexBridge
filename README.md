@@ -1,126 +1,136 @@
-# NexBridge
+# lore
 
-> **Why is this code like this?** — institutional memory that survives the people who leave.
+**`git blame` tells you who. `lore` tells you why.**
 
-NexBridge is a local-first CLI that reconstructs the *intent* behind a line of code. Point it
-at a line and it mines your git history — commit messages, the diffs that actually changed the
-line, the way the line evolved across renames — and synthesizes a short, **sourced** answer.
-
-Think `git blame`, but instead of a name and a hash it tells you the *story*.
+A local-first CLI that reconstructs the *intent* behind a line of code from its git
+history — the decision, not the timeline. Point it at a line and it reads the commits
+that shaped it, then explains why it's like this, with every claim traced back to a
+commit you can check.
 
 ```
-$ lore why src/auth/session.ts:88
+$ lore why src/upload.ts:88
 
-The 1100ms timeout exists because the upstream SSO provider intermittently
-took >1s to return under load, and the previous 500ms value 504'd the login
-page for ~3% of users (a3f9c21). It was bumped deliberately, not by accident,
-and the comment was never updated to say so.
+  88   await sleep(1100)
 
-Sources
-  a3f9c21  fix: raise SSO timeout to survive provider latency spikes
-  77b0e14  feat: add session bootstrap
+  This 1.1s pause guards against read-after-write on S3. The uploader
+  originally read the object back immediately (a4f2e1b); that read
+  intermittently 404'd because the bucket wasn't yet strongly consistent
+  in the target region.
+
+  The sleep was added in c83d90f. Its message says "fix flaky upload
+  test" — but the diff tells a different story: the same commit deleted
+  the retry loop just below it. So the sleep didn't fix a flaky test, it
+  replaced real retry logic with a fixed wait. It's a workaround, not a
+  fix — the race is still there if S3 is slow.
+
+  Sources
+    a4f2e1b  add direct read-back after upload
+    c83d90f  fix flaky upload test
 ```
 
-The model is plumbing, not the headline. The **output is the product**: a NexBridge answer
-leads with the decision and its reason, cites evidence you can verify, and says *"the history
-is silent"* rather than inventing a plausible motive. Confabulation is the one thing it must
-never do.
+That's the whole pitch: it leads with the reason, cites its evidence, and tells you when
+the commit message and the code disagree.
+
+## The part most tools get wrong
+
+The hard thing isn't summarizing history — it's *not making things up*. When the history
+doesn't actually explain something, `lore` says so instead of inventing a plausible motive:
+
+```
+$ lore why src/config.ts:12
+
+  12   const POOL_SIZE = 7
+
+  The history is silent on why this is 7. Three commits have touched this
+  line — 2b1c9aa, 5f0e213, 9dd4c01 — titled "wip", "fix", and "tweak
+  config", none with a body. The value went 4 → 10 → 7 with no recorded
+  reasoning. If there was a why, it never made it into git.
+
+  Sources
+    2b1c9aa  wip
+    5f0e213  fix
+    9dd4c01  tweak config
+```
+
+An honest "I don't know" beats a confident wrong answer. That refusal to confabulate is
+the point of the tool.
 
 ## Install
 
-Requires **Node ≥ 20**, **git**, and [pnpm](https://pnpm.io).
+Requires Node 18+ and `git`.
 
 ```bash
-git clone https://github.com/dentoverhoed/NexBridge.git
-cd NexBridge
-pnpm install
-pnpm build      # -> dist/cli.js (the `lore` binary)
+npm install -g lore
 ```
 
-## A narrator: zero keys with Ollama, or bring your own
-
-NexBridge talks to a model only in its final stage, behind one pluggable interface. It picks
-automatically:
-
-1. **Ollama (local, default)** — if an [Ollama](https://ollama.com) daemon is running, it is
-   used. Fully local, **no API keys**, your history never leaves the machine.
-   ```bash
-   ollama pull llama3.1:8b
-   ```
-2. **Anthropic (hosted)** — used as a fallback when Ollama is not running and a key is set.
-   ```bash
-   export ANTHROPIC_API_KEY=sk-ant-...
-   ```
-
-If neither is available, NexBridge tells you exactly how to fix it.
-
-## Usage
+## Use
 
 ```bash
 lore why <file>:<line>
-
-# during development, without building:
-pnpm dev -- why src/collect/git.ts:100
 ```
 
-The line is required — NexBridge explains a specific line as it exists at `HEAD`.
+`lore` reads a model to do the synthesis. Slice 1 uses a hosted model — set a key:
 
-### Configuration
+```bash
+export ANTHROPIC_API_KEY=sk-...
+lore why src/server.ts:142
+```
 
-| Variable             | Effect                                              | Default                  |
-| -------------------- | --------------------------------------------------- | ------------------------ |
-| `OLLAMA_HOST`        | Ollama daemon URL                                   | `http://localhost:11434` |
-| `LORE_OLLAMA_MODEL`  | Ollama model tag                                    | `llama3.1`               |
-| `ANTHROPIC_API_KEY`  | Enables the hosted Anthropic narrator               | —                        |
-| `LORE_MODEL`         | Anthropic model id                                  | `claude-opus-4-8`        |
+A fully local default (no key, history never leaves your machine) is the next milestone —
+see **Status**.
 
 ## How it works
 
-Three stages, cleanly separated and independently testable. Data flows one way:
-**Collect → Assemble → Narrate.**
+Three stages, one direction. No magic, and nothing you can't audit.
 
-1. **Collect** (`src/collect/`) — raw evidence, no interpretation. The load-bearing primitive
-   is `git log -L <line>,<line>:<file>` with a sentinel `--format`, which yields the commits
-   that changed the exact line **and** their diff hunks in one parseable pass — and follows
-   the line across file renames. The introducing commit is the bottom of that chain (not
-   `git blame`, which only reports the last modifier).
-2. **Assemble** (`src/assemble/`) — pure functions turn raw commits into a ranked `Dossier`:
-   commits that touched the line rank above file-only ones, recency breaks ties. Evidence is
-   flagged *thin* when it is sparse **or** low-signal (a wall of `fix` / `wip` / `init`), which
-   routes the narrator toward admitting silence instead of guessing.
-3. **Narrate** (`src/narrate/`) — the only stage that touches a model. A deterministic prompt
-   carries the line's diff hunks so the model can check what a commit message *claims* against
-   what the code *does*, and is forbidden from fabricating SHAs, URLs, or issue links.
+1. **Collect** — gather the raw evidence from git: the commits that touched the exact line
+   (`git log -L`), the broader file history, and the diff hunks that show how the line
+   actually changed over time. Read-only. No interpretation.
+2. **Assemble** — rank that evidence by relevance (line changes over file changes, recency
+   as tiebreak) into a tight dossier, and decide whether the history is rich enough to
+   explain anything at all.
+3. **Narrate** — turn the dossier into a sourced answer. This is the only stage that uses a
+   model, and it's held to a strict brief: lead with the reason, cite commits, separate
+   what a message *claims* from what the code *does*, and admit silence when the record is
+   thin.
 
-## Development
+## Design principles
 
-```bash
-pnpm typecheck      # tsc --noEmit
-pnpm lint           # eslint + prettier
-pnpm test           # vitest (real throwaway git repos, pinned dates)
-pnpm build          # tsup -> dist/
-```
+- **Leads with the decision**, not a chronological changelog.
+- **Cites everything.** Every claim points to a commit SHA you can open and distrust.
+- **Never invents a motive.** When git doesn't explain it, `lore` says the history is
+  silent. This is the cardinal rule, not a nice-to-have.
+- **Local-first.** Your code and its history stay on your machine. The only thing that ever
+  leaves is what you explicitly route to a hosted model — and a local model is the default
+  we're building toward.
+- **Not a chatbot, not a refactorer.** One question, one sourced answer. `lore` never
+  writes to your code.
 
-There is also a no-key harness that prints the dossier + prompt for sample targets so the
-Collect/Assemble quality can be reviewed without spending a model call:
+## Privacy
 
-```bash
-tsx test/manual/dump-prompt.ts
-tsx test/manual/gate.ts          # full pipeline through the real narrator
-```
+`lore` reads your git history locally and sends the assembled dossier — relevant commit
+messages and diff hunks for the line you asked about — to whichever model you configure.
+With the planned local model, nothing leaves your machine at all. `lore` never transmits
+your full repository, and it never writes to it.
 
 ## Status
 
-This is **slice 1** — the thin vertical slice that proves the bet (is the synthesis good?).
-It is built, tested, and has passed a validation gate against a local model on targets with
-known ground truth, including a confabulation trap it correctly refused to answer.
+Early, and honest about it. The `why` pipeline works end-to-end — `git` history in, sourced
+narrative out — against a hosted model (Anthropic). What's deliberately not built yet:
 
-**Shipped:** git-only Collect (rename-aware), ranked Dossier with thin-evidence detection,
-deterministic prompt, Ollama + Anthropic narrators behind one interface with auto-resolution.
+- Local model as the default (Ollama) — the headline privacy promise, next on the list.
+- Pull-request and issue mining (GitHub, GitLab) to recover the *discussion* behind a
+  change, not just the commit.
+- A richer interactive terminal UI and streamed output.
 
-**Not yet:** forge adapters (PR / issue mining), a TUI, streaming, response caching, an
-OpenAI-compatible narrator, whole-file and symbol targeting. The types already accommodate
-them.
+The architecture is built so these slot in without a rewrite. See `CLAUDE.md` for the
+internals and the reasoning behind the scope.
+
+## Contributing
+
+Issues and PRs welcome. The one thing held sacred: an answer must never assert a "why" the
+commits don't support. If you can make `lore` confabulate, that's the most valuable bug
+report you can file.
 
 ## License
 
