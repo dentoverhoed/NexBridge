@@ -2,7 +2,7 @@ import { buildDossier } from './assemble/dossier.js';
 import { collect } from './collect/git.js';
 import { parseTarget } from './collect/target.js';
 import { LoreError } from './errors.js';
-import { createAnthropicNarrator } from './narrate/anthropic.js';
+import { createNarrator } from './narrate/resolve.js';
 import { strings } from './strings.js';
 
 async function main(argv: string[]): Promise<number> {
@@ -36,7 +36,7 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  const narrator = createAnthropicNarrator();
+  const narrator = await createNarrator();
   const narrative = await narrator.narrate(dossier);
 
   console.log(narrative);

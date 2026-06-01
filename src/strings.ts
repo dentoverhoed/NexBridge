@@ -41,6 +41,16 @@ Example:
     'No ANTHROPIC_API_KEY found in the environment. Set it to let lore narrate, e.g.\n' +
     '  export ANTHROPIC_API_KEY=sk-ant-...',
 
+  noNarrator:
+    'lore could not find anything to narrate with. Either:\n' +
+    '  - start a local model: install Ollama and run "ollama pull llama3.1", or\n' +
+    '  - set ANTHROPIC_API_KEY for a hosted model.\n' +
+    'A local Ollama, if running, is used automatically — no keys needed.',
+
+  ollamaFailed: (detail: string) =>
+    `The local model (Ollama) failed: ${detail}. Is the model pulled? ` +
+    `Try "ollama pull llama3.1".`,
+
   gitFailed: (detail: string) => `git failed: ${detail}`,
 
   sourcesHeader: 'Sources',

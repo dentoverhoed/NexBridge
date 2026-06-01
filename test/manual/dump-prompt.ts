@@ -14,10 +14,14 @@ async function dump(label: string, repo: TempRepo, file: string, line: number) {
   const collected = await collect({ file, line }, repo.dir);
   const dossier = buildDossier(collected);
   console.log(`\n${'='.repeat(70)}\n${label} — ${file}:${line}\n${'='.repeat(70)}`);
-  console.log(`evidenceThin=${dossier.evidenceThin}  introducing=${dossier.introducingSha?.slice(0, 7)}`);
+  console.log(
+    `evidenceThin=${dossier.evidenceThin}  introducing=${dossier.introducingSha?.slice(0, 7)}`,
+  );
   console.log(
     'ranked commits:',
-    dossier.commits.map((c) => `${c.shortSha}${c.touchedTargetLine ? '*' : ' '} ${c.subject}`),
+    dossier.commits.map(
+      (c) => `${c.shortSha}${c.touchedTargetLine ? '*' : ' '} ${c.subject}`,
+    ),
   );
   console.log('\n--- prompt.user ---\n' + buildPrompt(dossier).user);
   repo.cleanup();
