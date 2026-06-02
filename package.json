@@ -1,5 +1,5 @@
 {
-  "name": "lore",
+  "name": "@dentoverhoed/lore",
   "version": "0.0.1",
   "description": "Why is this code like this? Local-first institutional memory from your git history.",
   "type": "module",

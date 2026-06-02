@@ -57,11 +57,17 @@ the point of the tool.
 
 ## Install
 
-Requires Node 18+ and `git`.
+Requires Node 20+, `git`, and [pnpm](https://pnpm.io).
 
 ```bash
-npm install -g lore
+git clone https://github.com/dentoverhoed/Lore.git
+cd Lore
+pnpm install
+pnpm build      # produces the `lore` binary in dist/
 ```
+
+Not on npm yet; when it publishes it will be as `@dentoverhoed/lore` (the bare name `lore`
+is an unrelated, abandoned package).
 
 ## Use
 
@@ -69,15 +75,21 @@ npm install -g lore
 lore why <file>:<line>
 ```
 
-`lore` reads a model to do the synthesis. Slice 1 uses a hosted model — set a key:
+`lore` uses a model only for the final synthesis, and picks one automatically:
 
-```bash
-export ANTHROPIC_API_KEY=sk-...
-lore why src/server.ts:142
-```
+- **Local, zero keys (default).** If an [Ollama](https://ollama.com) daemon is running it is
+  used — nothing leaves your machine.
+  ```bash
+  ollama pull llama3.1:8b
+  lore why src/server.ts:142
+  ```
+- **Hosted fallback.** If Ollama isn't running and a key is set, it uses Anthropic.
+  ```bash
+  export ANTHROPIC_API_KEY=sk-...
+  lore why src/server.ts:142
+  ```
 
-A fully local default (no key, history never leaves your machine) is the next milestone —
-see **Status**.
+If neither is available, `lore` tells you exactly how to fix it.
 
 ## How it works
 
@@ -110,18 +122,26 @@ Three stages, one direction. No magic, and nothing you can't audit.
 
 `lore` reads your git history locally and sends the assembled dossier — relevant commit
 messages and diff hunks for the line you asked about — to whichever model you configure.
-With the planned local model, nothing leaves your machine at all. `lore` never transmits
-your full repository, and it never writes to it.
+With the local Ollama narrator (the default when it's running), nothing leaves your machine
+at all. `lore` never transmits your full repository, and it never writes to it.
 
 ## Status
 
-Early, and honest about it. The `why` pipeline works end-to-end — `git` history in, sourced
-narrative out — against a hosted model (Anthropic). What's deliberately not built yet:
+Slice 1 — the thin vertical slice that proves the bet (is the synthesis any good?) — is built
+and validated. The `why` pipeline works end-to-end (git history in, sourced narrative out) and
+has passed a validation gate against a local model on targets with known ground truth,
+including a confabulation trap it correctly refused to answer. See `docs/validation-gate.md`.
 
-- Local model as the default (Ollama) — the headline privacy promise, next on the list.
-- Pull-request and issue mining (GitHub, GitLab) to recover the *discussion* behind a
-  change, not just the commit.
+Shipped: rename-aware Collect, a ranked dossier with thin-evidence detection, the
+anti-confabulation prompt, and **both narrators** — a local Ollama default (zero keys) and a
+hosted Anthropic fallback, chosen by auto-resolution.
+
+Deliberately not built yet:
+
+- Pull-request and issue mining (GitHub, GitLab) to recover the *discussion* behind a change,
+  not just the commit.
 - A richer interactive terminal UI and streamed output.
+- Response caching and an OpenAI-compatible narrator.
 
 The architecture is built so these slot in without a rewrite. See `CLAUDE.md` for the
 internals and the reasoning behind the scope.
